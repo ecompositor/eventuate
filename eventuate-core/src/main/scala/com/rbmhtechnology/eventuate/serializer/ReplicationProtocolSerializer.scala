@@ -209,7 +209,7 @@ class ReplicationProtocolSerializer(system: ExtendedActorSystem) extends Seriali
   }
 
   private def synchronizeReplicationProgressSourceExceptionFormatBuilder(ex: SynchronizeReplicationProgressSourceException): SynchronizeReplicationProgressSourceExceptionFormat.Builder =
-    SynchronizeReplicationProgressSourceExceptionFormat.newBuilder().setCauseMessage(ex.causeMessage)
+    SynchronizeReplicationProgressSourceExceptionFormat.newBuilder().setMessage(ex.message)
 
   // --------------------------------------------------------------------------------
   //  fromBinary helpers
@@ -286,5 +286,5 @@ class ReplicationProtocolSerializer(system: ExtendedActorSystem) extends Seriali
     ReplicationReadSourceException(exceptionFormat.getMessage)
 
   private def synchronizeReplicationProgressSourceException(exceptionFormat: SynchronizeReplicationProgressSourceExceptionFormat): SynchronizeReplicationProgressSourceException =
-    SynchronizeReplicationProgressSourceException(exceptionFormat.getCauseMessage)
+    SynchronizeReplicationProgressSourceException(exceptionFormat.getMessage)
 }

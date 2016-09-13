@@ -57,7 +57,7 @@ message SynchronizeReplicationProgressFailureFormat {
 }
 
 message SynchronizeReplicationProgressSourceExceptionFormat {
-  optional string causeMessage = 1;
+  optional string message = 1;
 }
 
 message ReplicationReadEnvelopeFormat {

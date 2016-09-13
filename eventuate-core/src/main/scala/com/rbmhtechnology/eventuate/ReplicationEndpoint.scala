@@ -287,6 +287,15 @@ class ReplicationEndpoint(
         case t => Future.failed(new RecoveryException(t, partialUpdate))
       }
 
+      // Disaster recovery is executed in 3 steps:
+      // 1. synchronize metadata to
+      //    - reset replication progress of remote sites and
+      //    - determine after disaster progress of remote sites
+      // 2. Recover events from unfiltered links
+      // 3. Recover events from filtered links
+      // unfiltered links are recovered first to ensure that no events are recovered from a filtered connection
+      // where the causal predecessor is not yet recovered (from an unfiltered connection)
+      // as causal predecessors cannot be written after their successors to the event log.
       for {
         localEndpointInfo <- recovery.readEndpointInfo.recoverWith(recoveryFailure(partialUpdate = false))
         _ = logLocalState(localEndpointInfo)

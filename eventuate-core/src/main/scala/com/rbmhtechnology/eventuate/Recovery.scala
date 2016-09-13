@@ -119,7 +119,7 @@ private class Recovery(endpoint: ReplicationEndpoint) {
       val remoteSequenceNr = info.logSequenceNrs(name)
       for {
         currentProgress <- readReplicationProgress(logActor, logId)
-        _ <- if (currentProgress > remoteSequenceNr) updateReplicationProgress(logActor, logId, info.logSequenceNrs(name))
+        _ <- if (currentProgress > remoteSequenceNr) updateReplicationMetadata(logActor, logId, remoteSequenceNr)
         else Future.successful(currentProgress)
       } yield ()
     } map (_ => ())
@@ -129,9 +129,13 @@ private class Recovery(endpoint: ReplicationEndpoint) {
     readResult[GetReplicationProgressSuccess, GetReplicationProgressFailure, Long](
       logActor.ask(GetReplicationProgress(logId)), _.storedReplicationProgress, _.cause)
 
-  private def updateReplicationProgress(logActor: ActorRef, logId: String, sequenceNr: Long): Future[Long] = {
+  /**
+    * Sets the replication progress for the remote replicate with id `logId` to `replicationProgress`
+    * and clears the cached version vector.
+    */
+  private def updateReplicationMetadata(logActor: ActorRef, logId: String, replicationProgress: Long): Future[Long] = {
     readResult[ReplicationWriteSuccess, ReplicationWriteFailure, Long](
-      logActor.ask(ReplicationWrite(Seq.empty, sequenceNr, logId, VectorTime.Zero)), _.storedReplicationProgress, _.cause)
+      logActor.ask(ReplicationWrite(Seq.empty, replicationProgress, logId, VectorTime.Zero)), _.storedReplicationProgress, _.cause)
   }
 
   /**

@@ -94,8 +94,8 @@ object ReplicationProtocol {
   /**
    * Indicates a problem synchronizing the replication progress of a remote [[ReplicationEndpoint]]
    */
-  private[eventuate] case class SynchronizeReplicationProgressSourceException(causeMessage: String)
-    extends SynchronizeReplicationProgressException(s"Failure when updating local replication progress: $causeMessage")
+  private[eventuate] case class SynchronizeReplicationProgressSourceException(message: String)
+    extends SynchronizeReplicationProgressException(s"Failure when updating local replication progress: $message")
     with Format
 
   /**
