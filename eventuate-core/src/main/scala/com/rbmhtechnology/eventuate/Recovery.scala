@@ -130,9 +130,9 @@ private class Recovery(endpoint: ReplicationEndpoint) {
       logActor.ask(GetReplicationProgress(logId)), _.storedReplicationProgress, _.cause)
 
   /**
-    * Sets the replication progress for the remote replicate with id `logId` to `replicationProgress`
-    * and clears the cached version vector.
-    */
+   * Sets the replication progress for the remote replicate with id `logId` to `replicationProgress`
+   * and clears the cached version vector.
+   */
   private def updateReplicationMetadata(logActor: ActorRef, logId: String, replicationProgress: Long): Future[Long] = {
     readResult[ReplicationWriteSuccess, ReplicationWriteFailure, Long](
       logActor.ask(ReplicationWrite(Seq.empty, replicationProgress, logId, VectorTime.Zero)), _.storedReplicationProgress, _.cause)

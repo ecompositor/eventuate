@@ -575,14 +575,14 @@ abstract class EventLog[A <: EventLogState](id: String) extends Actor with Event
         // 100% filtering coverage for certain replication network topologies.
         acc
       case (acc, e) =>
-        snr = (snr + 1) max e.vectorTimestamp.value.getOrElse(id, 0)
+        snr += 1
 
         val e2 = e.prepare(id, snr, e.systemTimestamp)
         lvv = lvv.merge(e2.vectorTimestamp)
         acc :+ e2
     }
     logFilterStatistics("target", events, updated)
-    (updated, clock.copy(sequenceNr = snr, versionVector = lvv))
+    (updated, clock.copy(sequenceNr = snr max lvv.value.getOrElse(id, 0), versionVector = lvv))
   }
 
   private def logFilterStatistics(location: String, before: Seq[DurableEvent], after: Seq[DurableEvent]): Unit = {

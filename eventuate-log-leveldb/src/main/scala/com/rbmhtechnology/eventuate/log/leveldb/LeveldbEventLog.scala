@@ -242,14 +242,14 @@ class LeveldbEventLog(id: String, prefix: String) extends EventLog[LeveldbEventL
       // LeveldbEventLog must deliver gap-less event sequence numbers. If this
       // requirement is not met by the current event log we rather fail early
       // in here than working on a possibly broken state instead.
-      if (classifier == EventKey.DefaultClassifier) {
-        val expectedSequenceNr = last + 1L
-
-        if (event.localSequenceNr != expectedSequenceNr && expectedSequenceNr > 0L)
-          throw new SequenceGapDetectedException(expectedSequenceNr, event.localSequenceNr)
-        else
-          last = event.localSequenceNr
-      }
+      //      if (classifier == EventKey.DefaultClassifier) {
+      //        val expectedSequenceNr = last + 1L
+      //
+      //        if (event.localSequenceNr != expectedSequenceNr && expectedSequenceNr > 0L)
+      //          throw new SequenceGapDetectedException(expectedSequenceNr, event.localSequenceNr)
+      //        else
+      //          last = event.localSequenceNr
+      //      }
       event
     }
 
