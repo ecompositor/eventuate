@@ -236,22 +236,7 @@ class LeveldbEventLog(id: String, prefix: String) extends EventLog[LeveldbEventL
     override def hasNext: Boolean =
       iter2.hasNext
 
-    override def next(): DurableEvent = {
-      val event = iter2.next()
-
-      // LeveldbEventLog must deliver gap-less event sequence numbers. If this
-      // requirement is not met by the current event log we rather fail early
-      // in here than working on a possibly broken state instead.
-      //      if (classifier == EventKey.DefaultClassifier) {
-      //        val expectedSequenceNr = last + 1L
-      //
-      //        if (event.localSequenceNr != expectedSequenceNr && expectedSequenceNr > 0L)
-      //          throw new SequenceGapDetectedException(expectedSequenceNr, event.localSequenceNr)
-      //        else
-      //          last = event.localSequenceNr
-      //      }
-      event
-    }
+    override def next(): DurableEvent = iter2.next()
 
     override def close(): Unit = {
       iter1.close()
@@ -373,10 +358,4 @@ object LeveldbEventLog {
     val logProps = Props(new LeveldbEventLog(logId, prefix)).withDispatcher("eventuate.log.dispatchers.write-dispatcher")
     if (batching) Props(new BatchingLayer(logProps)) else logProps
   }
-
-  /**
-   * Reported if a sequence number gap has been detected while reading events from the LevelDB event log.
-   */
-  class SequenceGapDetectedException(val expectedSequenceNr: Long, val actualSequenceNr: Long)
-    extends IllegalStateException(s"LevelDB event log contains unexpected sequence number gap. Detected $actualSequenceNr where $expectedSequenceNr was expected.")
 }
