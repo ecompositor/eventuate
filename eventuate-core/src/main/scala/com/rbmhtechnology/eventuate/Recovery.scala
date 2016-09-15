@@ -59,12 +59,16 @@ private class RecoverySettings(config: Config) {
 /**
  * Represents a link between a local and remote event log that are subject to disaster recovery.
  *
- * @param logName Common name of the linked local and remote event log.
+ * @param replicationLink used to recover events (through replication)
  * @param localSequenceNr sequence number of the local event log at the beginning of disaster recovery.
- * @param remoteLogId Remote event log id.
  * @param remoteSequenceNr Current sequence nr of the remote log
  */
-private case class RecoveryLink(logName: String, localSequenceNr: Long, remoteLogId: String, remoteSequenceNr: Long)
+private case class RecoveryLink(replicationLink: ReplicationLink, localSequenceNr: Long, remoteSequenceNr: Long) {
+  def isFiltered(endpoint: ReplicationEndpoint): Boolean =
+    // the replicationLink is used for event recovery
+    // check if its source initially (before disaster) received all (-> isFiltered returns false) events or not (-> true)
+    endpoint.endpointFilters.filterFor(replicationLink.source.logId, replicationLink.target.logName) != NoFilter
+}
 
 /**
  * Provides disaster recovery primitives.
@@ -99,10 +103,17 @@ private class Recovery(endpoint: ReplicationEndpoint) {
 
   /**
    * Synchronize sequence numbers of local logs with replication progress stored in remote replicas.
-   * @return a set of [[ReplicationEndpointInfo]] of all remote replicas
+   * @return a set of [[RecoveryLink]]s indicating the events that need to be recovered
    */
-  def synchronizeReplicationProgressesWithRemote(info: ReplicationEndpointInfo): Future[Set[ReplicationEndpointInfo]] =
-    Future.sequence(endpoint.connectors.map(connector => synchronizeReplicationProgressWithRemote(connector.remoteAcceptor, info)))
+  def synchronizeReplicationProgressesWithRemote(info: ReplicationEndpointInfo): Future[Set[RecoveryLink]] =
+    Future.traverse(endpoint.connectors) { connector =>
+      synchronizeReplicationProgressWithRemote(connector.remoteAcceptor, info).map { remoteInfo =>
+        connector.links(remoteInfo).map(toRecoveryLink(_, info, remoteInfo))
+      }
+    } map (_.flatten)
+
+  private def toRecoveryLink(replicationLink: ReplicationLink, localInfo: ReplicationEndpointInfo, remoteInfo: ReplicationEndpointInfo): RecoveryLink =
+    RecoveryLink(replicationLink, localInfo.logSequenceNrs(replicationLink.target.logName), remoteInfo.logSequenceNrs(replicationLink.target.logName))
 
   private def synchronizeReplicationProgressWithRemote(remoteAcceptor: ActorSelection, info: ReplicationEndpointInfo): Future[ReplicationEndpointInfo] =
     readResult[SynchronizeReplicationProgressSuccess, SynchronizeReplicationProgressFailure, ReplicationEndpointInfo](
@@ -164,20 +175,9 @@ private class Recovery(endpoint: ReplicationEndpoint) {
   def readEventLogClock(targetLog: ActorRef): Future[EventLogClock] =
     targetLog.ask(GetEventLogClock).mapTo[GetEventLogClockSuccess].map(_.clock)
 
-  def readRemoteEndpointInfo(targetAcceptor: ActorSelection): Future[ReplicationEndpointInfo] =
-    Retry(targetAcceptor.ask(GetReplicationEndpointInfo), remoteOperationRetryDelay, remoteOperationRetryMax)
-      .mapTo[GetReplicationEndpointInfoSuccess]
-      .map(_.info)
-
   private def deleteSnapshots(link: RecoveryLink): Future[Unit] =
     readResult[DeleteSnapshotsSuccess.type, DeleteSnapshotsFailure, Unit](
-      endpoint.logs(link.logName).ask(DeleteSnapshots(link.localSequenceNr + 1L))(Timeout(snapshotDeletionTimeout)), _ => (), _.cause)
-
-  def recoveryLinks(remoteEndpointInfos: Set[ReplicationEndpointInfo], localEndpointInfo: ReplicationEndpointInfo, filtered: Boolean): Set[RecoveryLink] = for {
-    endpointInfo <- remoteEndpointInfos
-    logName <- endpoint.commonLogNames(endpointInfo)
-    if (endpoint.endpointFilters.filterFor(endpointInfo.logId(logName), logName) != NoFilter) == filtered
-  } yield RecoveryLink(logName, localEndpointInfo.logSequenceNrs(logName), endpointInfo.logId(logName), endpointInfo.logSequenceNrs(logName))
+      endpoint.logs(link.replicationLink.target.logName).ask(DeleteSnapshots(link.localSequenceNr + 1L))(Timeout(snapshotDeletionTimeout)), _ => (), _.cause)
 
   private def readResult[S: ClassTag, F: ClassTag, R](f: Future[Any], result: S => R, cause: F => Throwable): Future[R] = f.flatMap {
     case success: S => Future.successful(result(success))
@@ -210,7 +210,7 @@ private class Acceptor(endpoint: ReplicationEndpoint) extends Actor {
 
   def recovering: Receive = {
     case Recover(links, promise) =>
-      endpoint.connectors.foreach(_.activate(Some(links.map(_.remoteLogId))))
+      endpoint.connectors.foreach(_.activate(Some(links.map(_.replicationLink))))
       val recoveryManager = context.actorOf(Props(new RecoveryManager(endpoint.id, links)))
       context.become(recoveringEvents(recoveryManager, promise) orElse processing)
     case RecoveryFinished =>
@@ -278,7 +278,7 @@ private class RecoveryManager(endpointId: String, links: Set[RecoveryLink]) exte
   def receive = recoveringEvents(links)
 
   private def recoveringEvents(active: Set[RecoveryLink]): Receive = {
-    case writeSuccess: ReplicationWriteSuccess if active.exists(_.remoteLogId == writeSuccess.sourceLogId) =>
+    case writeSuccess: ReplicationWriteSuccess if active.exists(_.replicationLink.source.logId == writeSuccess.sourceLogId) =>
       active.find(recoveryForLinkFinished(_, writeSuccess)).foreach { link =>
         val updatedActive = removeLink(active, link)
         if (updatedActive.isEmpty) {
@@ -290,13 +290,13 @@ private class RecoveryManager(endpointId: String, links: Set[RecoveryLink]) exte
   }
 
   private def recoveryForLinkFinished(link: RecoveryLink, writeSuccess: ReplicationWriteSuccess): Boolean =
-    link.remoteLogId == writeSuccess.sourceLogId && link.remoteSequenceNr <= writeSuccess.storedReplicationProgress
+    link.replicationLink.source.logId == writeSuccess.sourceLogId && link.remoteSequenceNr <= writeSuccess.storedReplicationProgress
 
   private def removeLink(active: Set[RecoveryLink], link: RecoveryLink): Set[RecoveryLink] = {
     val updatedActive = active - link
     val finished = links.size - updatedActive.size
     val all = links.size
-    log.info("[recovery of {}] Event recovery finished for remote log {} ({} of {})", endpointId, link.remoteLogId, finished, all)
+    log.info("[recovery of {}] Event recovery finished for remote log {} ({} of {})", endpointId, link.replicationLink.source.logId, finished, all)
     updatedActive
   }
 }
