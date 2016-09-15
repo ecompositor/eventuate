@@ -249,6 +249,7 @@ class ReplicationEndpoint(
     connections.map(new SourceConnector(this, _))
 
   // lazy to make sure concurrently running (created actors) do not access null-reference
+  // https://github.com/RBMHTechnology/eventuate/issues/183
   private[eventuate] lazy val acceptor: ActorRef =
     system.actorOf(Props(new Acceptor(this)), name = Acceptor.Name)
   acceptor // make sure acceptor is started
@@ -306,7 +307,7 @@ class ReplicationEndpoint(
         filteredLinks = recoveryLinks.filter(_.isFiltered(this))
         _ = logLinksToBeRecovered(filteredLinks, "filtered")
         _ <- recovery.recoverLinks(filteredLinks).recoverWith(recoveryFailure(partialUpdate = true))
-      } yield acceptor ! RecoveryFinished
+      } yield acceptor ! RecoveryCompleted
     } else Future.failed(new IllegalStateException("Recovery running or endpoint already activated"))
   }
 

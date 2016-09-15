@@ -213,7 +213,7 @@ private class Acceptor(endpoint: ReplicationEndpoint) extends Actor {
       endpoint.connectors.foreach(_.activate(Some(links.map(_.replicationLink))))
       val recoveryManager = context.actorOf(Props(new RecoveryManager(endpoint.id, links)))
       context.become(recoveringEvents(recoveryManager, promise) orElse processing)
-    case RecoveryFinished =>
+    case RecoveryCompleted =>
       context.become(processing)
   }
 
@@ -258,7 +258,7 @@ private object Acceptor {
 
   case object Process
   case class Recover(links: Set[RecoveryLink], promise: Promise[Unit])
-  case object RecoveryFinished
+  case object RecoveryCompleted
   case class RecoveryStepCompleted(link: RecoveryLink)
   case object MetadataRecoveryCompleted
   case object EventRecoveryCompleted
