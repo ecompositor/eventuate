@@ -34,15 +34,22 @@ import scala.concurrent.duration._
 import scala.util._
 
 object DurableEventWriter {
-  def apply(eventLog: ActorRef, max: Int): Flow[DurableEvent, DurableEvent, NotUsed] = {
+  def batchWriter(id: String, eventLog: ActorRef, maxBatchSize: Int): Flow[DurableEvent, DurableEvent, NotUsed] = {
     Flow[DurableEvent]
-      .batch(max, Seq(_)) { case (s, e) => s :+ e }
-      .via(new DurableEventWriter(eventLog))
+      .batch(maxBatchSize, Seq(_)) { case (s, e) => s :+ e }
+      .via(new DurableEventWriter(id, eventLog))
       .mapConcat(identity)
   }
+
+  def batchWriterN(id: String, eventLog: ActorRef, maxBatchSize: Int): Flow[Seq[DurableEvent], DurableEvent, NotUsed] =
+    Flow[Seq[DurableEvent]]
+      .batchWeighted(maxBatchSize, _.size, Seq(_))(_ :+ _)
+      .mapConcat(identity)
+      .via(new DurableEventWriter(id, eventLog))
+      .mapConcat(identity)
 }
 
-class DurableEventWriter(eventLog: ActorRef) extends GraphStage[FlowShape[Seq[DurableEvent], Seq[DurableEvent]]] {
+class DurableEventWriter(id: String, eventLog: ActorRef) extends GraphStage[FlowShape[Seq[DurableEvent], Seq[DurableEvent]]] {
   val in = Inlet[Seq[DurableEvent]]("DurableEventWriter.in")
   val out = Outlet[Seq[DurableEvent]]("DurableEventWriter.out")
 
@@ -62,7 +69,11 @@ class DurableEventWriter(eventLog: ActorRef) extends GraphStage[FlowShape[Seq[Du
       }
 
       private def write(events: Seq[DurableEvent]): Future[Seq[DurableEvent]] = {
-        eventLog.ask(ReplicationWrite(events.map(_.copy(processId = UndefinedLogId)), 0L, UndefinedLogId, VectorTime.Zero)).flatMap {
+        // ----------------------------------------------------
+        //  TODO: support writing of multiple progress values
+        //  (because events may come from several source logs)
+        // ----------------------------------------------------
+        eventLog.ask(ReplicationWrite(events.map(_.copy(emitterId = id, processId = UndefinedLogId)), 0L, UndefinedLogId, VectorTime.Zero)).flatMap {
           case s: ReplicationWriteSuccess => Future.successful(s.events)
           case f: ReplicationWriteFailure => Future.failed(f.cause)
         }(materializer.executionContext)

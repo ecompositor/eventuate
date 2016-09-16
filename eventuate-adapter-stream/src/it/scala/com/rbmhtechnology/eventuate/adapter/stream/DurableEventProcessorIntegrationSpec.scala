@@ -28,20 +28,28 @@ import org.scalatest._
 
 import scala.collection.immutable.Seq
 
-class DurableEventWriterIntegrationSpec extends TestKit(ActorSystem("test")) with WordSpecLike with Matchers with SingleLocationSpecLeveldb {
+class DurableEventProcessorIntegrationSpec extends TestKit(ActorSystem("test")) with WordSpecLike with Matchers with SingleLocationSpecLeveldb {
   implicit val materializer: Materializer = ActorMaterializer()
 
   val SrcEmitterId = "src-emitter"
   val SrcLogId = "src-log"
-  val WriterId = "writer"
+  val ProcessorId = "processor"
+
 
   def durableEvent(payload: String, sequenceNr: Long): DurableEvent =
     DurableEvent(payload, SrcEmitterId, processId = SrcLogId, localLogId = SrcLogId, localSequenceNr = sequenceNr, vectorTimestamp = VectorTime(SrcLogId -> sequenceNr))
 
-  "A DurableEventWriter" must {
-    "write an event stream to a log and emit the logged events" in {
+  "A DurableEventProcessor" must {
+    "support stateless stream processing" in {
+      def logic = Flow[Any].mapConcat(p => Seq(p.toString + "1", p.toString + "2"))
+      val logicAB = logic.filterNot(_ == "b1")
+      val logicC = logic.filter(_.startsWith("a"))
+
       val (src, snk) = TestSource.probe[DurableEvent]
-        .via(DurableEventWriter.batchWriter(WriterId, log, 2))
+        .via(DurableEventProcessor.statelessProcessor(ProcessorId, log, 2) {
+          case "c" => logicC
+          case _   => logicAB
+        })
         .toMat(TestSink.probe[DurableEvent])(Keep.both)
         .run()
 
@@ -51,30 +59,27 @@ class DurableEventWriterIntegrationSpec extends TestKit(ActorSystem("test")) wit
       src.sendNext(durableEvent("b", 12))
       src.sendNext(durableEvent("c", 13))
 
-      snk.expectNextN(3).map(e => (e.payload, e.emitterId, e.processId, e.localLogId, e.localSequenceNr, e.vectorTimestamp)) should be(Seq(
-        ("a", WriterId, logId, logId, 1L, VectorTime(SrcLogId -> 11L, logId -> 1L)),
-        ("b", WriterId, logId, logId, 2L, VectorTime(SrcLogId -> 12L, logId -> 2L)),
-        ("c", WriterId, logId, logId, 3L, VectorTime(SrcLogId -> 13L, logId -> 3L))))
-
+      snk.expectNextN(3).map(_.payload) should be(Seq("a1", "a2", "b2"))
       snk.cancel()
     }
-    "write a flattened event sequence stream to a log and emit the logged events" in {
-      val writerId = "w1"
-      val (src, snk) = TestSource.probe[Seq[DurableEvent]]
-        .via(DurableEventWriter.batchWriterN(WriterId, log, 2))
+    "support stateful stream processing" in {
+      def logic(s: Int, p: Any): (Int, Seq[String]) = {
+        val ctr = if (p.toString.contains("b")) s + 1 else s
+        (ctr, Seq(s"${p}1($ctr)", s"${p}2($ctr)"))
+      }
+
+      val (src, snk) = TestSource.probe[DurableEvent]
+        .via(DurableEventProcessor.statefulProcessor(ProcessorId, log, 2, 0)(logic))
         .toMat(TestSink.probe[DurableEvent])(Keep.both)
         .run()
 
-      snk.request(3)
+      snk.request(6)
 
-      src.sendNext(Seq(durableEvent("a", 11)))
-      src.sendNext(Seq(durableEvent("b", 12), durableEvent("c", 13)))
+      src.sendNext(durableEvent("a", 11))
+      src.sendNext(durableEvent("b", 12))
+      src.sendNext(durableEvent("c", 13))
 
-      snk.expectNextN(3).map(e => (e.payload, e.emitterId, e.processId, e.localLogId, e.localSequenceNr, e.vectorTimestamp)) should be(Seq(
-        ("a", WriterId, logId, logId, 1L, VectorTime(SrcLogId -> 11L, logId -> 1L)),
-        ("b", WriterId, logId, logId, 2L, VectorTime(SrcLogId -> 12L, logId -> 2L)),
-        ("c", WriterId, logId, logId, 3L, VectorTime(SrcLogId -> 13L, logId -> 3L))))
-
+      snk.expectNextN(6).map(_.payload) should be(Seq("a1(0)", "a2(0)", "b1(1)", "b2(1)", "c1(1)", "c2(1)"))
       snk.cancel()
     }
   }

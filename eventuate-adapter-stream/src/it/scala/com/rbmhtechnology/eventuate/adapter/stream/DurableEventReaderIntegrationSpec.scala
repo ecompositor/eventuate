@@ -18,7 +18,6 @@ package com.rbmhtechnology.eventuate.adapter.stream
 
 import akka.actor._
 import akka.stream._
-import akka.stream.scaladsl._
 import akka.stream.testkit.scaladsl._
 import akka.testkit._
 
