@@ -94,6 +94,12 @@ case class EventLogClock(sequenceNr: Long = 0L, versionVector: VectorTime = Vect
    */
   def update(event: DurableEvent): EventLogClock =
     copy(sequenceNr = event.localSequenceNr, versionVector = versionVector.merge(event.vectorTimestamp))
+
+  /**
+   * Sets `sequenceNr` to max of `sequenceNr` and `processId`s entry in `versionVector`.
+   */
+  def adjustSequenceNrToProcessTime(processId: String): EventLogClock =
+    copy(sequenceNr = sequenceNr max versionVector.value.getOrElse(processId, 0))
 }
 
 /**
@@ -143,6 +149,11 @@ trait EventLogSPI[A] { this: Actor =>
    * Called after failed event log state recovery.
    */
   def recoverStateFailure(cause: Throwable): Unit = ()
+
+  /**
+   * Asynchronously writes the current snapshot of the event log clock
+   */
+  def writeEventLogClockSnapshot(clock: EventLogClock): Future[Unit]
 
   /**
    * Asynchronously reads all stored local replication progresses.
@@ -478,6 +489,14 @@ abstract class EventLog[A <: EventLogState](id: String) extends Actor with Event
         case Success(_) => sdr ! DeleteSnapshotsSuccess
         case Failure(e) => sdr ! DeleteSnapshotsFailure(e)
       }
+    case AdjustEventLogClock =>
+      import context.dispatcher
+      clock = clock.adjustSequenceNrToProcessTime(id)
+      val sdr = sender()
+      writeEventLogClockSnapshot(clock) onComplete {
+        case Success(_) => sdr ! AdjustEventLogClockSuccess(clock)
+        case Failure(ex) => sdr ! AdjustEventLogClockFailure(ex)
+      }
     case Terminated(subscriber) =>
       registry = registry.unregisterSubscriber(subscriber)
   }
@@ -582,7 +601,7 @@ abstract class EventLog[A <: EventLogState](id: String) extends Actor with Event
         acc :+ e2
     }
     logFilterStatistics("target", events, updated)
-    (updated, clock.copy(sequenceNr = snr max lvv.value.getOrElse(id, 0), versionVector = lvv))
+    (updated, clock.copy(sequenceNr = snr, versionVector = lvv))
   }
 
   private def logFilterStatistics(location: String, before: Seq[DurableEvent], after: Seq[DurableEvent]): Unit = {

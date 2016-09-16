@@ -307,6 +307,7 @@ class ReplicationEndpoint(
         filteredLinks = recoveryLinks.filter(_.isFiltered(this))
         _ = logLinksToBeRecovered(filteredLinks, "filtered")
         _ <- recovery.recoverLinks(filteredLinks).recoverWith(recoveryFailure(partialUpdate = true))
+        _ <- recovery.adjustEventLogClocks.recoverWith(recoveryFailure(partialUpdate = true))
       } yield acceptor ! RecoveryCompleted
     } else Future.failed(new IllegalStateException("Recovery running or endpoint already activated"))
   }

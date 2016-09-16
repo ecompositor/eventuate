@@ -179,6 +179,19 @@ private class Recovery(endpoint: ReplicationEndpoint) {
     readResult[DeleteSnapshotsSuccess.type, DeleteSnapshotsFailure, Unit](
       endpoint.logs(link.replicationLink.target.logName).ask(DeleteSnapshots(link.localSequenceNr + 1L))(Timeout(snapshotDeletionTimeout)), _ => (), _.cause)
 
+  /**
+   * In case disaster recovery was not able to recover all events (e.g. only through a single filtered connection)
+   * the local sequence no must be adjusted to the log's version vector to avoid events being
+   * written in the causal past.
+   */
+  def adjustEventLogClocks: Future[Unit] =
+    Future.traverse(endpoint.logs.values)(adjustEventLogClock).map(_ => ())
+
+  private def adjustEventLogClock(log: ActorRef): Future[Unit] = {
+    readResult[AdjustEventLogClockSuccess, AdjustEventLogClockFailure, Unit](
+      log ? AdjustEventLogClock, _ => (), _.cause)
+  }
+
   private def readResult[S: ClassTag, F: ClassTag, R](f: Future[Any], result: S => R, cause: F => Throwable): Future[R] = f.flatMap {
     case success: S => Future.successful(result(success))
     case failure: F => Future.failed(cause(failure))

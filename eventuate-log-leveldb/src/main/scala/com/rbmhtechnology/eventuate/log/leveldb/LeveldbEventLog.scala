@@ -112,6 +112,9 @@ class LeveldbEventLog(id: String, prefix: String) extends EventLog[LeveldbEventL
   override def writeReplicationProgress(logId: String, progress: Long): Future[Unit] =
     completed(withBatch(batch => replicationProgressMap.writeReplicationProgress(logId, progress, batch)))
 
+  def writeEventLogClockSnapshot(clock: EventLogClock): Future[Unit] =
+    withBatch(batch => Future.fromTry(Try(writeEventLogClockSnapshotSync(clock, batch))))
+
   private def eventIterator(from: Long, classifier: Int): EventIterator =
     new EventIterator(from, classifier)
 
@@ -136,9 +139,7 @@ class LeveldbEventLog(id: String, prefix: String) extends EventLog[LeveldbEventL
   override def recoverState: Future[LeveldbEventLogState] = completed {
     val clockSnapshot = readEventLogClockSnapshot
     val clockRecovered = withEventIterator(clockSnapshot.sequenceNr + 1L, EventKey.DefaultClassifier) { iter =>
-      iter.foldLeft(clockSnapshot) {
-        case (clock, event) => clock.update(event)
-      }
+      iter.foldLeft(clockSnapshot)(_ update _)
     }
     LeveldbEventLogState(clockRecovered, deletionMetadataStore.readDeletionMetadata())
   }
@@ -199,10 +200,13 @@ class LeveldbEventLog(id: String, prefix: String) extends EventLog[LeveldbEventL
     updateCount += events.size
 
     if (updateCount >= settings.stateSnapshotLimit) {
-      batch.put(clockKeyBytes, clockBytes(clock))
+      writeEventLogClockSnapshotSync(clock, batch)
       updateCount = 0
     }
   }
+
+  private def writeEventLogClockSnapshotSync(clock: EventLogClock, batch: WriteBatch): Unit =
+    batch.put(clockKeyBytes, clockBytes(clock))
 
   private def withIterator[R](body: DBIterator => R): R = {
     val so = snapshotOptions()

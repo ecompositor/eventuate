@@ -232,6 +232,22 @@ object ReplicationProtocol {
   case class ReplicationReadTimeoutException(timeout: FiniteDuration) extends ReplicationReadException(s"Replication read timed out after $timeout")
 
   /**
+   * Instruct a log to adjust the sequence nr of the internal [[EventLogClock]] to the version vector.
+   * This is ensures that the sequence nr is greater than or equal to the log's entry in the version vector.
+   */
+  case object AdjustEventLogClock
+
+  /**
+   * Success reply after a [[AdjustEventLogClock]]. Contains the adjusted clock.
+   */
+  case class AdjustEventLogClockSuccess(clock: EventLogClock)
+
+  /**
+   * Failure reply after a [[AdjustEventLogClock]].
+   */
+  case class AdjustEventLogClockFailure(cause: Throwable)
+
+  /**
    * Indicates that events cannot be replication from a source [[ReplicationEndpoint]] to a target [[ReplicationEndpoint]]
    * because their application versions are incompatible.
    */
